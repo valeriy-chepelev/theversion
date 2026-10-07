@@ -1,18 +1,105 @@
 import ssl
+
 ssl._create_default_https_context = ssl._create_unverified_context
 
 import flet as ft
 from typing import Any
 from datetime import datetime
 
+from yandex_tracker_client import TrackerClient
+import functools
+import time
+import configparser
+from natsort import natsorted
+
+
+def retry_on_exception(exception=Exception, retries=3, delay=1):
+    """
+    Декоратор для повторных попыток выполнения функции при возникновении указанного исключения.
+    ai-generated
+
+    Параметры:
+        exception : класс исключения (или кортеж классов), которые нужно перехватывать.
+        retries   : максимальное количество попыток (включая первый вызов).
+        delay     : пауза в секундах между попытками.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(1, retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exception as e:
+                    last_exception = e
+                    # print(f"Попытка {attempt}/{retries} завершилась ошибкой: {e}. "
+                    #       f"Повтор через {delay} сек...")
+                    time.sleep(delay)
+            # Все попытки исчерпаны, выбрасываем последнее пойманное исключение
+            raise last_exception
+
+        return wrapper
+
+    return decorator
+
+
+class VerDataHost:
+    def __init__(self):
+        config = configparser.ConfigParser()
+        config.read('theversion.ini')
+        assert 'token' in config['DEFAULT']
+        assert 'org' in config['DEFAULT']
+        assert 'prefix' in config['DEFAULT']
+        assert 'queues' in config['DEFAULT']
+        self._prefix = config['DEFAULT']['prefix']
+        self._queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
+        if len(config['DEFAULT']['org']) < 15:  # Yes, a magic number! cloud_org_id usually have length 20
+            self._client = TrackerClient(token=config['DEFAULT']['token'],
+                                         org_id=config['DEFAULT']['org'])
+        else:
+            self._client = TrackerClient(token=config['DEFAULT']['token'],
+                                         cloud_org_id=config['DEFAULT']['org'])
+        if self._client.myself is None:
+            raise Exception('Unable to connect Yandex Tracker.')
+
+    def _read_ver(self):
+        for q_name in self._queues:
+            for v in self._client.queues[q_name].versions:
+                if str(v.name).lower().startswith(self._prefix.lower()):
+                    yield {'name': v.name,
+                           'desc': '' if v.description is None else v.description,
+                           'release': v.released,
+                           'archive': v.archived}
+
+    def versions(self):
+        v = dict()
+        for ver in self._read_ver():
+            if ver['name'] in v:
+                v[ver['name']]['desc'] = ''.join([v[ver['name']]['desc'],
+                                                  ver['desc']])
+                v[ver['name']]['release'] = v[ver['name']]['release'] | ver['release']
+                v[ver['name']]['archive'] = v[ver['name']]['archive'] | ver['archive']
+            else:
+                v.update({ver['name']:
+                              {'desc': ver['desc'],
+                               'release': ver['release'],
+                               'archive': ver['archive']}})
+        return v
+
 
 # ---------- Заглушка бэкенда ----------
 def backend_load() -> list[dict[str, Any]]:
-    return [
-        {"ver": "1.0.0",       "desc": "Первый релиз",                "release": True,  "archive": False},
-        {"ver": "1.0.1",       "desc": "Фикс парсера,\nмелкие правки", "release": True,  "archive": False},
-        {"ver": "1.1.0-beta",  "desc": "Черновик новой ветки",         "release": False, "archive": False},
-    ]
+    v = VerDataHost().versions()
+    return [{'ver': key, 'desc': v[key]['desc'],
+             'release': v[key]['release'], 'archive': v[key]['archive']}
+            for key in natsorted([*v], reverse=True)]
+
+    '''return [
+        {"ver": "1.0.0", "desc": "Первый релиз", "release": True, "archive": False},
+        {"ver": "1.0.1", "desc": "Фикс парсера,\nмелкие правки", "release": True, "archive": False},
+        {"ver": "1.1.0-beta", "desc": "Черновик новой ветки", "release": False, "archive": False},
+    ]'''
 
 
 def backend_save(items: list[dict[str, Any]]) -> None:
@@ -20,7 +107,7 @@ def backend_save(items: list[dict[str, Any]]) -> None:
 
 
 # ---------- UI ----------
-COL_VER_W = 160   # ширина колонки "Версия"
+COL_VER_W = 160  # ширина колонки "Версия"
 COL_BOOL_W = 110  # ширина колонок "Релиз"/"Архив"
 
 
@@ -94,10 +181,10 @@ def main(page: ft.Page):
     # ----- шапка таблицы -----
     header = ft.Row(
         controls=[
-            ft.Text("Версия",   width=COL_VER_W, weight=ft.FontWeight.BOLD),
-            ft.Text("Описание", expand=True,     weight=ft.FontWeight.BOLD),
-            ft.Container(ft.Text("Релиз",  weight=ft.FontWeight.BOLD), width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
-            ft.Container(ft.Text("Архив",  weight=ft.FontWeight.BOLD), width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
+            ft.Text("Версия", width=COL_VER_W, weight=ft.FontWeight.BOLD),
+            ft.Text("Описание", expand=True, weight=ft.FontWeight.BOLD),
+            ft.Container(ft.Text("Релиз", weight=ft.FontWeight.BOLD), width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
+            ft.Container(ft.Text("Архив", weight=ft.FontWeight.BOLD), width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
         ],
     )
 
@@ -121,8 +208,8 @@ def main(page: ft.Page):
     def on_save(e: ft.ControlEvent):
         data = [
             {
-                "ver":     r["ver"].value,
-                "desc":    r["desc"].value,
+                "ver": r["ver"].value,
+                "desc": r["desc"].value,
                 "release": r["release"].value,
                 "archive": r["archive"].value,
             }
