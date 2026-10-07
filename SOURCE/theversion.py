@@ -111,11 +111,42 @@ COL_VER_W = 160  # ширина колонки "Версия"
 COL_BOOL_W = 110  # ширина колонок "Релиз"/"Архив"
 
 
+
 def main(page: ft.Page):
     page.title = "The Version"
     page.window.width = 980
     page.window.height = 640
     page.padding = 16
+
+    def make_palette(dark: bool) -> dict:
+        """Все цвета строк в одном месте. Меняйте только здесь."""
+        if dark:
+            return {
+                "release_bg": ft.Colors.with_opacity(0.14, ft.Colors.GREEN),
+                "release_fg": ft.Colors.GREEN_300,
+                "normal_fg": None,
+                "archive_bg": ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                "archive_fg": ft.Colors.GREY_600,
+            }
+        return {
+            "release_bg": ft.Colors.with_opacity(0.12, ft.Colors.GREEN),
+            "release_fg": ft.Colors.GREEN_800,
+            "normal_fg": None,
+            "archive_bg": ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+            "archive_fg": ft.Colors.GREY_500,
+        }
+
+    PALETTE = make_palette(page.theme_mode == ft.ThemeMode.DARK)
+
+    def colors_for(is_release: bool, is_archive: bool) -> tuple[str | None, str]:
+        """Приоритет: архив глушит всё; иначе релиз — зелёный; иначе — дефолт."""
+        if is_archive and is_release:
+            return PALETTE["archive_bg"], PALETTE["release_fg"]
+        elif is_archive:
+            return PALETTE["archive_bg"], PALETTE["archive_fg"]
+        elif is_release:
+            return PALETTE["release_bg"], PALETTE["release_fg"]
+        return None, PALETTE["normal_fg"]
 
     # ----- контейнер строк, который будет скроллиться -----
     rows_box = ft.Column(
@@ -140,35 +171,38 @@ def main(page: ft.Page):
     def mark_dirty(e=None):
         set_status("Изменено", ft.Colors.ORANGE)
 
-    def build_row(item: dict[str, Any]) -> ft.Row:
+    def build_row(item: dict) -> ft.Container:
+        is_release = bool(item.get("release", False))
+        is_archive = bool(item.get("archive", False))
+        bg, fg = colors_for(is_release, is_archive)
+
         ver = ft.TextField(
             value=str(item.get("ver", "")),
             read_only=True,
             width=COL_VER_W,
             dense=True,
-            text_style=ft.TextStyle(font_family="monospace"),
+            text_style=ft.TextStyle(font_family="monospace", color=fg),
             border=ft.InputBorder.NONE,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6)
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
         )
         desc = ft.TextField(
             value=str(item.get("desc", "")),
             multiline=True,
             min_lines=1,
-            max_lines=4,
+            max_lines=10,
             expand=True,
             dense=True,
             border=ft.InputBorder.NONE,
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-            on_change=mark_dirty
+            on_change=mark_dirty,
+            text_style=ft.TextStyle(color=fg),
         )
-        release = ft.Checkbox(value=bool(item.get("release", False)),
-                              on_change=mark_dirty)
-        archive = ft.Checkbox(value=bool(item.get("archive", False)),
-                              on_change=mark_dirty)
+        release = ft.Checkbox(value=is_release)
+        archive = ft.Checkbox(value=is_archive)
 
         row_widgets.append({"ver": ver, "desc": desc, "release": release, "archive": archive})
 
-        return ft.Row(
+        inner = ft.Row(
             controls=[
                 ver,
                 desc,
@@ -177,6 +211,33 @@ def main(page: ft.Page):
             ],
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
+
+        row_container = ft.Container(
+            content=inner,
+            bgcolor=bg,
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+        )
+
+        # --- живая перекраска при клике по чекбоксам ---
+        def recolor(e=None):
+            b, f = colors_for(release.value, archive.value)
+            row_container.bgcolor = b
+            ver.text_style.color = f
+            desc.text_style.color = f
+            page.update()
+
+        def on_release(e):
+            recolor()
+            mark_dirty()
+
+        def on_archive(e):
+            recolor()
+            mark_dirty()
+
+        release.on_change = on_release
+        archive.on_change = on_archive
+
+        return row_container
 
     # ----- шапка таблицы -----
     header = ft.Row(
