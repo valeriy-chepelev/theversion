@@ -13,6 +13,9 @@ import configparser
 from natsort import natsorted
 
 
+# ---------- Backend ----------
+
+
 def retry_on_exception(exception=Exception, retries=3, delay=1):
     """
     Декоратор для повторных попыток выполнения функции при возникновении указанного исключения.
@@ -72,14 +75,19 @@ class VerDataHost:
                            'release': v.released,
                            'archive': v.archived}
 
+    @retry_on_exception()
     def versions(self):
         v = dict()
         for ver in self._read_ver():
             if ver['name'] in v:
-                v[ver['name']]['desc'] = ''.join([v[ver['name']]['desc'],
-                                                  ver['desc']])
-                v[ver['name']]['release'] = v[ver['name']]['release'] | ver['release']
-                v[ver['name']]['archive'] = v[ver['name']]['archive'] | ver['archive']
+                v[ver['name']]['release'] = v[ver['name']]['release'] or ver['release']
+                v[ver['name']]['archive'] = v[ver['name']]['archive'] or ver['archive']
+                if v[ver['name']]['desc'] != ver['desc']:
+                    if v[ver['name']]['desc'] == '':
+                        v[ver['name']]['desc'] = ver['desc']
+                    elif ver['desc'] != '':
+                        v[ver['name']]['desc'] = '; '.join([v[ver['name']]['desc'],
+                                                            ver['desc']])
             else:
                 v.update({ver['name']:
                               {'desc': ver['desc'],
@@ -88,28 +96,15 @@ class VerDataHost:
         return v
 
 
-# ---------- Заглушка бэкенда ----------
-def backend_load() -> list[dict[str, Any]]:
-    v = VerDataHost().versions()
-    return [{'ver': key, 'desc': v[key]['desc'],
-             'release': v[key]['release'], 'archive': v[key]['archive']}
-            for key in natsorted([*v], reverse=True)]
-
-    '''return [
-        {"ver": "1.0.0", "desc": "Первый релиз", "release": True, "archive": False},
-        {"ver": "1.0.1", "desc": "Фикс парсера,\nмелкие правки", "release": True, "archive": False},
-        {"ver": "1.1.0-beta", "desc": "Черновик новой ветки", "release": False, "archive": False},
-    ]'''
-
+# ---------- UI ----------
 
 def backend_save(items: list[dict[str, Any]]) -> None:
     print("SAVE:", items)  # сюда придёт список dict
+    time.sleep(5)
 
 
-# ---------- UI ----------
 COL_VER_W = 160  # ширина колонки "Версия"
 COL_BOOL_W = 110  # ширина колонок "Релиз"/"Архив"
-
 
 
 def main(page: ft.Page):
@@ -117,6 +112,8 @@ def main(page: ft.Page):
     page.window.width = 980
     page.window.height = 640
     page.padding = 16
+
+    data_host = None
 
     def make_palette(dark: bool) -> dict:
         """Все цвета строк в одном месте. Меняйте только здесь."""
@@ -182,7 +179,7 @@ def main(page: ft.Page):
             width=COL_VER_W,
             dense=True,
             text_style=ft.TextStyle(font_family="monospace", color=fg),
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
         )
         desc = ft.TextField(
@@ -192,7 +189,7 @@ def main(page: ft.Page):
             max_lines=10,
             expand=True,
             dense=True,
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             on_change=mark_dirty,
             text_style=ft.TextStyle(color=fg),
@@ -250,23 +247,43 @@ def main(page: ft.Page):
     )
 
     # ----- перезагрузка данных -----
-    def reload_data():
-        rows_box.controls.clear()
-        row_widgets.clear()
-        items = backend_load()
 
-        for i, item in enumerate(items):
-            rows_box.controls.append(build_row(item))
-            if i < len(items) - 1:
-                rows_box.controls.append(ft.Divider(height=1, thickness=1))
+    def on_refresh(e):
+        if busy.visible:
+            return  # защита от двойного клика
+        set_busy(True)
+        set_status("Обновление…")
 
-        set_status('')
-        page.update()
+        def work():
+            nonlocal data_host
+            try:
+                if data_host is None:
+                    data_host = VerDataHost()
+                v = data_host.versions()
+                items = [{'ver': key, 'desc': v[key]['desc'],
+                          'release': v[key]['release'], 'archive': v[key]['archive']}
+                         for key in natsorted([*v], reverse=True)]
+            except Exception as ex:
+                set_busy(False)
+                set_status(f"Ошибка: {ex}", ft.Colors.RED)
+                return
 
-    def on_refresh(e: ft.ControlEvent):
-        reload_data()
+            # обновляем UI в главном потоке — Flet сам переключит контекст
+            rows_box.controls.clear()
+            row_widgets.clear()
 
-    def on_save(e: ft.ControlEvent):
+            for i, item in enumerate(items):
+                rows_box.controls.append(build_row(item))
+                if i < len(items) - 1:
+                    rows_box.controls.append(ft.Divider(height=1, thickness=1))
+
+            set_busy(False)
+            set_status("")
+
+        page.run_thread(work)
+
+    def do_save():
+        """Собственно сохранение — вынесли из on_save, чтобы вызывать после подтверждения."""
         data = [
             {
                 "ver": r["ver"].value,
@@ -276,17 +293,66 @@ def main(page: ft.Page):
             }
             for r in row_widgets
         ]
-        backend_save(data)
-        set_status(f"Сохранено в {datetime.now():%H:%M:%S}", ft.Colors.GREEN)
-        page.update()
+
+        set_busy(True)
+        set_status("Сохранение…")
+
+        def work():
+            try:
+                backend_save(data)
+            except Exception as ex:
+                set_busy(False)
+                set_status(f"Ошибка: {ex}", ft.Colors.RED)
+                return
+            set_busy(False)
+            set_status(f"Сохранено в {datetime.now():%H:%M:%S}", ft.Colors.GREEN)
+
+        page.run_thread(work)
+
+    def on_save(e):
+        if busy.visible:
+            return
+
+        def close_dialog():
+            page.pop_dialog()
+
+        def on_confirm(e):
+            close_dialog()
+            do_save()
+
+        def on_cancel(e):
+            close_dialog()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Записать данные?"),
+            content=ft.Text(
+                "Содержимое таблицы будет отправлено на сервер\n"
+                "и изменит версии в очередях "
+                f"{', '.join(data_host._queues)}."
+            ),
+            actions=[
+                ft.FilledButton("Отмена", on_click=on_cancel),
+                ft.TextButton("Записать", on_click=on_confirm),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        page.show_dialog(dlg)
+
+
 
     # ----- верхняя панель с кнопками -----
+
+    busy = ft.ProgressRing(width=20, height=20, stroke_width=2, visible=False)
+
     top_bar = ft.Container(
         content=ft.Row(
             controls=[
-                ft.FilledButton("Обновить", icon=ft.Icons.REFRESH, on_click=on_refresh),
-                ft.FilledTonalButton("Записать", icon=ft.Icons.CLOUD_UPLOAD, on_click=on_save),
+                btn_refresh := ft.FilledButton("Обновить", icon=ft.Icons.REFRESH, on_click=on_refresh),
+                btn_save := ft.FilledTonalButton("Записать", icon=ft.Icons.CLOUD_UPLOAD, on_click=on_save),
                 ft.Container(expand=True),
+                busy,
                 status,
             ],
             spacing=12,
@@ -296,6 +362,12 @@ def main(page: ft.Page):
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,  # <-- цвет панели из seed
         border_radius=None,
     )
+
+    def set_busy(is_busy: bool):
+        busy.visible = is_busy
+        btn_refresh.disabled = is_busy
+        btn_save.disabled = is_busy
+        page.update()
 
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.theme = ft.Theme(
@@ -313,7 +385,7 @@ def main(page: ft.Page):
 
     )
 
-    reload_data()
+    on_refresh(None)
 
 
 if __name__ == "__main__":
