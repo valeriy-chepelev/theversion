@@ -255,6 +255,13 @@ def main(page: ft.Page):
 
         return row_container
 
+    sel_queues_label = ft.Text(
+        "",
+        size=12,
+        italic=True,
+        color=ft.Colors.ON_SURFACE_VARIANT,
+    )
+
     def build_filter_row() -> ft.Control:
         nonlocal data_host
         if data_host is None:
@@ -377,6 +384,8 @@ def main(page: ft.Page):
                 if i < len(items) - 1:
                     rows_box.controls.append(ft.Divider(height=1, thickness=1))
 
+            sel_queues_label.value = f"в очередях\n{', '.join(data_host.sel_queues)}"
+
             set_busy(False)
             set_status("")
 
@@ -447,9 +456,17 @@ def main(page: ft.Page):
     busy = ft.ProgressRing(width=20, height=20, stroke_width=2, visible=False)
 
     filter_row = ft.Container(
-        content=build_filter_row(),
+        content=ft.Row(
+            controls=[
+                build_filter_row(),
+                ft.Container(width=8),  # небольшой отступ
+                sel_queues_label,
+            ],
+            spacing=0,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,  # чуть тише, чем top_bar
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
         border_radius=ft.BorderRadius.all(10),
     )
 
