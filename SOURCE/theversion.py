@@ -50,25 +50,35 @@ def retry_on_exception(exception=Exception, retries=3, delay=1):
 class VerDataHost:
     def __init__(self):
         config = configparser.ConfigParser()
-        config.read('theversion.ini')
-        assert 'token' in config['DEFAULT']
-        assert 'org' in config['DEFAULT']
-        assert 'prefix' in config['DEFAULT']
-        assert 'queues' in config['DEFAULT']
+        read_files = config.read('theversion.ini')
+        if not read_files:
+            raise RuntimeError("Файл theversion.ini не найден")
+        for key in ("token", "org", "prefix", "queues"):
+            if key not in config['DEFAULT']:
+                raise RuntimeError(f"В theversion.ini отсутствует параметр '{key}'")
+        self._token = config['DEFAULT']['token']
+        self._org = config['DEFAULT']['org']
         self._filters = [u.strip() for u in config['DEFAULT']['prefix'].split(',')]
         self._prefix = self._filters[0]
         self._queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
-        self.sel_queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
-        if len(config['DEFAULT']['org']) < 15:  # Yes, a magic number! cloud_org_id usually have length 20
-            self._client = TrackerClient(token=config['DEFAULT']['token'],
-                                         org_id=config['DEFAULT']['org'])
+        self.sel_queues = list(self._queues)
+        self._client = None
+
+    def _init_client(self):
+        if self._client is not None:
+            return
+        if len(self._org) < 15:  # Yes, a magic number! cloud_org_id usually have length 20
+            client = TrackerClient(token=self._token,
+                                   org_id=self._org)
         else:
-            self._client = TrackerClient(token=config['DEFAULT']['token'],
-                                         cloud_org_id=config['DEFAULT']['org'])
-        if self._client.myself is None:
-            raise Exception('Unable to connect Yandex Tracker.')
+            client = TrackerClient(token=self._token,
+                                   cloud_org_id=self._org)
+        if client.myself is None:
+            raise RuntimeError('Yandex Tracker недоступен.')
+        self._client = client
 
     def _read_ver(self):
+        self._init_client()
         for q_name in self.sel_queues:
             for v in self._client.queues[q_name].versions:
                 if str(v.name).lower().startswith(self._prefix.lower()):
@@ -155,7 +165,7 @@ def main(page: ft.Page):
     PALETTE = make_palette(page.theme_mode == ft.ThemeMode.DARK)
 
     def colors_for(is_release: bool, is_archive: bool) -> tuple[str | None, str]:
-        """Приоритет: архив глушит всё; иначе релиз — зелёный; иначе — дефолт."""
+        """Приоритет: релиз — зелёный; архив глушёный; иначе — дефолт."""
         if is_archive and is_release:
             return PALETTE["archive_bg"], PALETTE["release_fg"]
         elif is_archive:
@@ -279,24 +289,6 @@ def main(page: ft.Page):
             segments=[ft.Segment(value=n, label=ft.Text(n)) for n in names],
         )
         return seg
-
-    '''def build_queues_row() -> ft.Control:
-        nonlocal data_host
-        if data_host is None:
-            data_host = VerDataHost()
-        names = data_host.queues  # list[str]
-
-        if not names:
-            return ft.Container()  # пустой ряд, если фильтров нет
-
-        seg1 = ft.SegmentedButton(
-            selected=data_host.sel_queues,
-            allow_multiple_selection=True,
-            allow_empty_selection=True,  # всегда что-то выбрано
-            on_change=on_queue_change,
-            segments=[ft.Segment(value=n, label=ft.Text(n)) for n in names],
-        )
-        return seg1'''
 
     def build_queues_chips() -> ft.Control:
         nonlocal data_host
@@ -441,15 +433,13 @@ def main(page: ft.Page):
                 f"{', '.join(data_host.sel_queues)}."
             ),
             actions=[
-                ft.FilledButton("Отмена", on_click=on_cancel),
-                ft.TextButton("Записать", on_click=on_confirm),
+                ft.TextButton("Отмена", on_click=on_cancel),
+                ft.FilledButton("Записать", on_click=on_confirm),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
         page.show_dialog(dlg)
-
-
 
     # ----- верхняя панель с кнопками -----
 
@@ -469,7 +459,6 @@ def main(page: ft.Page):
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
         border_radius=ft.BorderRadius.all(10),
     )
-
 
     top_bar = ft.Container(
         content=ft.Row(
