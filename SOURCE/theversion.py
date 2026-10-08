@@ -55,7 +55,8 @@ class VerDataHost:
         assert 'org' in config['DEFAULT']
         assert 'prefix' in config['DEFAULT']
         assert 'queues' in config['DEFAULT']
-        self._prefix = config['DEFAULT']['prefix']
+        self._filters = [u.strip() for u in config['DEFAULT']['prefix'].split(',')]
+        self._prefix = self._filters[0]
         self._queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
         if len(config['DEFAULT']['org']) < 15:  # Yes, a magic number! cloud_org_id usually have length 20
             self._client = TrackerClient(token=config['DEFAULT']['token'],
@@ -94,6 +95,23 @@ class VerDataHost:
                                'release': ver['release'],
                                'archive': ver['archive']}})
         return v
+
+    @property
+    def queues(self):
+        return self._queues
+
+    @property
+    def filters(self):
+        return self._filters
+
+    @property
+    def prefix(self):
+        return self._prefix
+
+    @prefix.setter
+    def prefix(self, value):
+        assert value in self._filters
+        self._prefix = value
 
 
 # ---------- UI ----------
@@ -236,6 +254,33 @@ def main(page: ft.Page):
 
         return row_container
 
+    def build_filter_row() -> ft.Control:
+        nonlocal data_host
+        if data_host is None:
+            data_host = VerDataHost()
+        names = data_host.filters  # list[str]
+
+        if not names:
+            return ft.Container()  # пустой ряд, если фильтров нет
+
+        seg = ft.SegmentedButton(
+            selected=[data_host.prefix],
+            allow_multiple_selection=False,
+            allow_empty_selection=False,  # всегда что-то выбрано
+            on_change=on_filter_change,
+            segments=[ft.Segment(value=n, label=ft.Text(n)) for n in names],
+        )
+        return seg
+
+    def on_filter_change(e):
+        # SegmentedButton кладёт выбранное в .selected — это set
+        new_filter = next(iter(e.control.selected))
+        if new_filter == data_host.prefix:
+            return
+        data_host.prefix = new_filter
+        # Без предупреждения: любые правки пользователя просто теряются
+        on_refresh(None)
+
     # ----- шапка таблицы -----
     header = ft.Row(
         controls=[
@@ -329,7 +374,7 @@ def main(page: ft.Page):
             content=ft.Text(
                 "Содержимое таблицы будет отправлено на сервер\n"
                 "и изменит версии в очередях "
-                f"{', '.join(data_host._queues)}."
+                f"{', '.join(data_host.queues)}."
             ),
             actions=[
                 ft.FilledButton("Отмена", on_click=on_cancel),
@@ -345,6 +390,13 @@ def main(page: ft.Page):
     # ----- верхняя панель с кнопками -----
 
     busy = ft.ProgressRing(width=20, height=20, stroke_width=2, visible=False)
+
+    filter_row = ft.Container(
+        content=build_filter_row(),
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,  # чуть тише, чем top_bar
+        border_radius=ft.BorderRadius.all(10),
+    )
 
     top_bar = ft.Container(
         content=ft.Row(
@@ -378,6 +430,7 @@ def main(page: ft.Page):
     # ----- сборка страницы -----
     page.add(
         top_bar,
+        filter_row,
         ft.Divider(height=1),
         header,
         ft.Divider(height=1),
