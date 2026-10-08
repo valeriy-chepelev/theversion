@@ -58,6 +58,7 @@ class VerDataHost:
         self._filters = [u.strip() for u in config['DEFAULT']['prefix'].split(',')]
         self._prefix = self._filters[0]
         self._queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
+        self.sel_queues = [u.strip() for u in config['DEFAULT']['queues'].split(',')]
         if len(config['DEFAULT']['org']) < 15:  # Yes, a magic number! cloud_org_id usually have length 20
             self._client = TrackerClient(token=config['DEFAULT']['token'],
                                          org_id=config['DEFAULT']['org'])
@@ -68,7 +69,7 @@ class VerDataHost:
             raise Exception('Unable to connect Yandex Tracker.')
 
     def _read_ver(self):
-        for q_name in self._queues:
+        for q_name in self.sel_queues:
             for v in self._client.queues[q_name].versions:
                 if str(v.name).lower().startswith(self._prefix.lower()):
                     yield {'name': v.name,
@@ -272,6 +273,60 @@ def main(page: ft.Page):
         )
         return seg
 
+    '''def build_queues_row() -> ft.Control:
+        nonlocal data_host
+        if data_host is None:
+            data_host = VerDataHost()
+        names = data_host.queues  # list[str]
+
+        if not names:
+            return ft.Container()  # пустой ряд, если фильтров нет
+
+        seg1 = ft.SegmentedButton(
+            selected=data_host.sel_queues,
+            allow_multiple_selection=True,
+            allow_empty_selection=True,  # всегда что-то выбрано
+            on_change=on_queue_change,
+            segments=[ft.Segment(value=n, label=ft.Text(n)) for n in names],
+        )
+        return seg1'''
+
+    def build_queues_chips() -> ft.Control:
+        nonlocal data_host
+        if data_host is None:
+            data_host = VerDataHost()
+        chips = []
+        for n in data_host.queues:
+            chip = ft.Chip(
+                label=ft.Text(n),
+                selected=(n in data_host.sel_queues),
+                on_select=on_chip_select,  # важное: on_select, а не on_change
+            )
+            chips.append(chip)
+        return ft.Row(chips, wrap=True, spacing=8)
+
+    def find_all_chips(any_chip: ft.Chip) -> list[ft.Chip]:
+        """Собирает все чипы-сиблинги, начиная с любого чипа в ряду."""
+        parent = any_chip.parent
+        if parent is None or not hasattr(parent, "controls"):
+            return [any_chip]
+        return [c for c in parent.controls if isinstance(c, ft.Chip)]
+
+    def on_chip_select(e):
+        chip = e.control
+        # Chip сам меняет свой .selected, нам надо только прочитать результат
+        new_selection = [
+            c.label.value for c in find_all_chips(chip) if c.selected
+        ]
+
+        if not new_selection:
+            # Пользователь снял последний — возвращаем его обратно
+            chip.selected = True
+            page.update()
+            return
+
+        data_host.sel_queues = new_selection
+
     def on_filter_change(e):
         # SegmentedButton кладёт выбранное в .selected — это set
         new_filter = next(iter(e.control.selected))
@@ -374,7 +429,7 @@ def main(page: ft.Page):
             content=ft.Text(
                 "Содержимое таблицы будет отправлено на сервер\n"
                 "и изменит версии в очередях "
-                f"{', '.join(data_host.queues)}."
+                f"{', '.join(data_host.sel_queues)}."
             ),
             actions=[
                 ft.FilledButton("Отмена", on_click=on_cancel),
@@ -398,11 +453,13 @@ def main(page: ft.Page):
         border_radius=ft.BorderRadius.all(10),
     )
 
+
     top_bar = ft.Container(
         content=ft.Row(
             controls=[
                 btn_refresh := ft.FilledButton("Обновить", icon=ft.Icons.REFRESH, on_click=on_refresh),
                 btn_save := ft.FilledTonalButton("Записать", icon=ft.Icons.CLOUD_UPLOAD, on_click=on_save),
+                build_queues_chips(),
                 ft.Container(expand=True),
                 busy,
                 status,
