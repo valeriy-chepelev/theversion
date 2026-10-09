@@ -1,0 +1,5 @@
+[DEFAULT]
+org = dummy
+token = dummy
+prefix = ARM_CFG, WebSCADA
+queues = MTFW, MTSW
