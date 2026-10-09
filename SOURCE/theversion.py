@@ -3,7 +3,6 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 import flet as ft
-from typing import Any
 from datetime import datetime
 
 from yandex_tracker_client import TrackerClient
@@ -172,8 +171,11 @@ class VerDataHost:
 
 # ---------- UI ----------
 
-COL_VER_W = 160  # ширина колонки "Версия"
+COL_VER_W = 160  # дефолтная ширина колонки "Версия"
 COL_BOOL_W = 110  # ширина колонок "Релиз"/"Архив"
+CHAR_W = 9  # ширина одного символа моноширинного шрифта, px
+VER_PAD = 32  # внутренние отступы TextField (слева+справа+рамка)
+VER_MIN = 80  # минимальная ширина, чтобы «пустая» колонка не схлопнулась
 
 
 def main(page: ft.Page):
@@ -237,7 +239,7 @@ def main(page: ft.Page):
     def mark_dirty(e=None):
         set_status("Изменено", ft.Colors.ORANGE)
 
-    def build_row(item: dict) -> ft.Container:
+    def build_row(item: dict, name_width=COL_VER_W) -> ft.Container:
         is_release = bool(item.get("release", False))
         is_archive = bool(item.get("archive", False))
         bg, fg = colors_for(is_release, is_archive)
@@ -245,7 +247,7 @@ def main(page: ft.Page):
         ver = ft.TextField(
             value=str(item.get("ver", "")),
             read_only=True,
-            width=COL_VER_W,
+            width=name_width,
             dense=True,
             text_style=ft.TextStyle(font_family="monospace", color=fg),
             border=ft.NoInputBorder(),
@@ -412,14 +414,20 @@ def main(page: ft.Page):
                 set_status(f"Ошибка: {ex}", ft.Colors.RED)
                 return
 
+            # считаем ширину поля наименования
+
+            width = max(VER_MIN, max(len(item['ver']) for item in items) * CHAR_W + VER_PAD)
+
             # обновляем UI в главном потоке — Flet сам переключит контекст
             rows_box.controls.clear()
             row_widgets.clear()
 
             for i, item in enumerate(items):
-                rows_box.controls.append(build_row(item))
+                rows_box.controls.append(build_row(item, width))
                 if i < len(items) - 1:
                     rows_box.controls.append(ft.Divider(height=1, thickness=1))
+
+            header.controls[0].width = width
 
             sel_queues_label.value = f"в очередях\n{', '.join(data_host.sel_queues)}"
 
