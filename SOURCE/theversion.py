@@ -7,6 +7,7 @@ from typing import Any
 from datetime import datetime
 
 from yandex_tracker_client import TrackerClient
+from yandex_tracker_client.exceptions import TrackerServerError
 import functools
 import time
 import configparser
@@ -76,32 +77,76 @@ class VerDataHost:
         if client.myself is None:
             raise RuntimeError('Yandex Tracker недоступен.')
         self._client = client
+        # self._client.connector.base_url = "https://api.tracker.yandex.net/v3"
 
+    @retry_on_exception(TrackerServerError)
     def _read_ver(self):
         self._init_client()
         for q_name in self.sel_queues:
             for v in self._client.queues[q_name].versions:
                 if str(v.name).lower().startswith(self._prefix.lower()):
-                    yield {'name': v.name,
+                    yield {'ver': v.name,
                            'desc': '' if v.description is None else v.description,
                            'release': v.released,
                            'archive': v.archived}
 
-    @retry_on_exception()
+    @retry_on_exception(TrackerServerError)
+    def _write_ver(self, data):
+        self._init_client()
+        for q_name in self.sel_queues:
+            target = next((v for v in self._client.queues[q_name].versions
+                           if str(v.name).lower() == data['ver'].lower()), None)
+            if target is None:
+                # создаем новую версию
+                self._client.versions.create(
+                    queue=q_name,
+                    name=data['ver']
+                )
+                # re-read target
+                time.sleep(0.5)
+                target = next((v for v in self._client.queues[q_name].versions
+                               if str(v.name).lower() == data['ver'].lower()), None)
+            if target is None:
+                raise RuntimeError('Запись недоступна')
+
+            if target.description != data['desc']:
+                target.update(description=data['desc'])
+                time.sleep(0.5)
+            if target.archived:
+                if not data['archive']:
+                    target.perform_action('_unarchive', 'post', ignore_empty_body=True)
+                    time.sleep(0.5)
+            else:
+                if data['archive']:
+                    target.perform_action('_archive', 'post', ignore_empty_body=True)
+                    time.sleep(0.5)
+            if target.released:
+                if not data['release']:
+                    raise RuntimeError('UnRelease не поддерживается.')
+            else:
+                if data['release']:
+                    target.perform_action('_release', 'post', ignore_empty_body=True)
+                    time.sleep(0.5)
+
+    def store(self, data):
+        for item in data:
+            self._write_ver(item)
+
+    @retry_on_exception(TrackerServerError)
     def versions(self):
         v = dict()
         for ver in self._read_ver():
-            if ver['name'] in v:
-                v[ver['name']]['release'] = v[ver['name']]['release'] or ver['release']
-                v[ver['name']]['archive'] = v[ver['name']]['archive'] or ver['archive']
-                if v[ver['name']]['desc'] != ver['desc']:
-                    if v[ver['name']]['desc'] == '':
-                        v[ver['name']]['desc'] = ver['desc']
+            if ver['ver'] in v:
+                v[ver['ver']]['release'] = v[ver['ver']]['release'] or ver['release']
+                v[ver['ver']]['archive'] = v[ver['ver']]['archive'] or ver['archive']
+                if v[ver['ver']]['desc'] != ver['ver']:
+                    if v[ver['ver']]['desc'] == '':
+                        v[ver['ver']]['desc'] = ver['desc']
                     elif ver['desc'] != '':
-                        v[ver['name']]['desc'] = '; '.join([v[ver['name']]['desc'],
-                                                            ver['desc']])
+                        v[ver['ver']]['desc'] = '; '.join([v[ver['ver']]['desc'],
+                                                           ver['desc']])
             else:
-                v.update({ver['name']:
+                v.update({ver['ver']:
                               {'desc': ver['desc'],
                                'release': ver['release'],
                                'archive': ver['archive']}})
@@ -126,11 +171,6 @@ class VerDataHost:
 
 
 # ---------- UI ----------
-
-def backend_save(items: list[dict[str, Any]]) -> None:
-    print("SAVE:", items)  # сюда придёт список dict
-    time.sleep(5)
-
 
 COL_VER_W = 160  # ширина колонки "Версия"
 COL_BOOL_W = 110  # ширина колонок "Релиз"/"Архив"
@@ -225,6 +265,7 @@ def main(page: ft.Page):
         )
         release = ft.Checkbox(value=is_release)
         archive = ft.Checkbox(value=is_archive)
+        original_release = ft.Checkbox(value=is_release, visible=False)
 
         row_widgets.append({"ver": ver, "desc": desc, "release": release, "archive": archive})
 
@@ -234,6 +275,7 @@ def main(page: ft.Page):
                 desc,
                 ft.Container(content=release, width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
                 ft.Container(content=archive, width=COL_BOOL_W, alignment=ft.Alignment.CENTER),
+                original_release
             ],
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
@@ -253,8 +295,11 @@ def main(page: ft.Page):
             page.update()
 
         def on_release(e):
+            if original_release.value and not release.value:
+                release.value = True
+            else:
+                mark_dirty()
             recolor()
-            mark_dirty()
 
         def on_archive(e):
             recolor()
@@ -400,7 +445,7 @@ def main(page: ft.Page):
 
         def work():
             try:
-                backend_save(data)
+                data_host.store(data)
             except Exception as ex:
                 set_busy(False)
                 set_status(f"Ошибка: {ex}", ft.Colors.RED)
@@ -429,7 +474,7 @@ def main(page: ft.Page):
             title=ft.Text("Записать данные?"),
             content=ft.Text(
                 "Содержимое таблицы будет отправлено на сервер\n"
-                "и изменит версии в очередях "
+                f"и изменит версии в очеред{'ях' if len(data_host.sel_queues) > 1 else 'и'}\n"
                 f"{', '.join(data_host.sel_queues)}."
             ),
             actions=[
