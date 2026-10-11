@@ -6,6 +6,9 @@ on:
       - 'v*'          # запуск при пуше тега вида v1.0.0
   workflow_dispatch:   # возможность запустить вручную из вкладки Actions
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -42,9 +45,20 @@ jobs:
       - name: Copy example ini next to exe
         run: Copy-Item src/theversion/theversion.ini.example dist/TheVersion/theversion.ini
 
+      - name: Zip for release
+        run: Compress-Archive -Path dist/TheVersion/* -DestinationPath dist/TheVersion.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TheVersion-Windows
           path: dist/TheVersion/
-          if-no-files-found: error
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/TheVersion.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
