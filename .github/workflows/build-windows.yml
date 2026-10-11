@@ -40,7 +40,7 @@ jobs:
             -y
 
       - name: Copy example ini next to exe
-        run: Copy-Item src/theversion/theversion.ini.example dist/TheVersion/
+        run: Copy-Item src/theversion/theversion.ini.example dist/TheVersion/theversion.ini
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

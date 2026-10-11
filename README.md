@@ -16,11 +16,14 @@
 
 Готовые сборки для Windows — во вкладке [Releases](../../releases).
 
-Распакуйте архив и запустите `TheVersion.exe`.
+- Распакуйте архив в паку без системных запретов (ProgramFiles не годится),
+- Настройте доступ и параметры в `theversion.ini`
+- Запустите `TheVersion.exe`.
 
 ## Настройка
 
-Настройте файл `theversion.ini`, удалив расширение `.example`:
+Настройки подключения к Yandex Tracker и выбора очередей и версий
+выполняются в файле `theversion.ini`, расположенном рядом с `TheVersion.exe`:
 
 ```ini
 [DEFAULT]
