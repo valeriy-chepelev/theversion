@@ -12,10 +12,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -34,7 +34,23 @@ jobs:
             --distpath dist `
             --product-name "The Version" `
             -y
-        
+          
+            - name: Build with flet pack (onedir)
+        run: |
+          flet pack src/theversion/theversion.py `
+            --name TheVersion `
+            --onedir `
+            --icon assets/theversion.ico `
+            --product-name "The Version" `
+            --company-name "Valeriy Chepelev" `
+            --copyright "Copyright (c) 2026 Valeriy Chepelev" `
+            --file-version 0.1.0.0 `
+            --product-version 0.1.0.0 `
+            --distpath dist `
+            -y
+
+      - name: Copy example ini next to exe
+        run: Copy-Item src/theversion/theversion.ini.example dist/TheVersion/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

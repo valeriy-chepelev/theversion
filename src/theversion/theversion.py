@@ -1,6 +1,13 @@
 import ssl
+import os
+import sys
+from pathlib import Path
 
 ssl._create_default_https_context = ssl._create_unverified_context
+
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("FLET_APP_STORAGE_DATA",
+                          str(Path(sys.executable).parent / "appdata"))
 
 import flet as ft
 from datetime import datetime
@@ -49,8 +56,13 @@ def retry_on_exception(exception=Exception, retries=3, delay=1):
 
 class VerDataHost:
     def __init__(self):
+        def _config_path() -> Path:
+            base = Path(sys.executable).parent if getattr(sys, "frozen", False) \
+                else Path(__file__).parent
+            return base / "theversion.ini"
+
         config = configparser.ConfigParser()
-        read_files = config.read('theversion.ini')
+        read_files = config.read(_config_path())
         if not read_files:
             raise RuntimeError("Файл theversion.ini не найден")
         for key in ("token", "org", "prefix", "queues"):
