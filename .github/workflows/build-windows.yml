@@ -37,8 +37,8 @@ jobs:
             --product-name "The Version" `
             --company-name "Valeriy Chepelev" `
             --copyright "Copyright (c) 2026 Valeriy Chepelev" `
-            --file-version 0.1.0.0 `
-            --product-version 0.1.0.0 `
+            --file-version 0.1.1.0 `
+            --product-version 0.1.1.0 `
             --distpath dist `
             -y
 

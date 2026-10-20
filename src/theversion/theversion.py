@@ -150,7 +150,7 @@ class VerDataHost:
             if ver['ver'] in v:
                 v[ver['ver']]['release'] = v[ver['ver']]['release'] or ver['release']
                 v[ver['ver']]['archive'] = v[ver['ver']]['archive'] or ver['archive']
-                if v[ver['ver']]['desc'] != ver['ver']:
+                if v[ver['ver']]['desc'] != ver['desc']:
                     if v[ver['ver']]['desc'] == '':
                         v[ver['ver']]['desc'] = ver['desc']
                     elif ver['desc'] != '':
