@@ -1,7 +1,11 @@
-import ssl
-import os
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from _version import __version__
+import ssl
+import os
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -191,7 +195,7 @@ VER_MIN = 80  # минимальная ширина, чтобы «пустая»
 
 
 def main(page: ft.Page):
-    page.title = "The Version"
+    page.title = f"The Version {__version__}"
     page.window.width = 980
     page.window.height = 640
     page.padding = 16

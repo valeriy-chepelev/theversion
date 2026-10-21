@@ -72,14 +72,14 @@ queues = <перечень тегов очередей через запятую
 ## Запуск из исходников
 ```bash
 pip install -r requirements.txt
-python src/theversion/__init__.py
+python src/theversion/theversion.py
 ```
 
 ## Сборка
 Сборка выполняется автоматически в GitHub Actions при пуше тега v*.
 Локально:
 ```bash
-flet pack src/theversion/__init__.py --onedir --name TheVersion
+flet pack src/theversion/theversion.py --onedir --name TheVersion
 ```
 
 ## Автор

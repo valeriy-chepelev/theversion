@@ -27,6 +27,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+          
+      - name: Read version
+        id: ver
+        run: |
+          $v = python -c "import sys; sys.path.insert(0, 'src'); from theversion._version import __version__; print(__version__)"
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Verify tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $ver = "${{ steps.ver.outputs.VERSION }}"
+          if ($tag -ne $ver) {
+            throw "Tag '${{ github.ref_name }}' does not match version '$ver' in _version.py"
+          }
 
       - name: Build with flet pack (onedir)
         run: |
@@ -37,8 +52,8 @@ jobs:
             --product-name "The Version" `
             --company-name "Valeriy Chepelev" `
             --copyright "Copyright (c) 2026 Valeriy Chepelev" `
-            --file-version 0.1.1.0 `
-            --product-version 0.1.1.0 `
+            --file-version ${{ steps.ver.outputs.VERSION }}.0  `
+            --product-version ${{ steps.ver.outputs.VERSION }}.0  `
             --distpath dist `
             -y
 

@@ -1,6 +1,6 @@
 [project]
 name = "theversion"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Versions synchronizer for Yandex Tracker"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,3 +14,6 @@ dependencies = [
     "yandex-tracker-client",
     "natsort",
 ]
+
+[tool.setuptools.dynamic]
+version = { attr = "theversion._version.__version__" }
